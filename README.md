@@ -3,7 +3,7 @@ A bot that notifies/Alerts a server through a message when another bot goes down
 
 The main use is to let users know when a bot goes offline and becomes unusable.
 
-#Setup configuration 
+# Setup configuration 
 Edit the values in settings.py to change the bots behavior! An example is given below:
 ```python
 #Settings
