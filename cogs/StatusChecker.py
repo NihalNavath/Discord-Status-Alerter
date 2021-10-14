@@ -1,71 +1,59 @@
-import json
 import datetime
 
 import discord
-import utils.errors as errors
-
-import config.settings as config
-
-from discord.ext import tasks
 from discord.ext import commands
 
-class StatusChecker(commands.Cog):
+from utils import errors, bot_utils
+import settings as config
+
+class Statuschecker(commands.Cog):
     """The main cog that handles status checking."""
-
-
     def __init__(self, bot):
         self.bot = bot
         self.embed_color = config.embed_color
 
-        self.check_status.start()
+        self.offline = {}
 
-    async def alert(self, member_info):
+    async def alert(self, member_info, offline: bool):
         """Main function that handles alerting the owner(s), sends a message in all the 
-        channels specified under "channels" array in settings.json"""
+        channels specified under "channels" array in settings.py"""
+        if offline:
+            down_time = datetime.datetime.now()
+            self.offline[member_info.id] = down_time
+                    
+            title = f"{member_info} is now **DOWN**"
+            description = f"time noticed:- {discord.utils.format_dt(down_time, style='F')}"  
+            message = config.alert_message
+            color = 0xff0004      
+        else:
+            difference = datetime.datetime.now() - self.offline[member_info.id]    
+            downtime = bot_utils.timedelta_to_humanreadable(difference)
+            title = f"{member_info} is now back up"
+            description = f"offline for {downtime}"
+            message = config.up_message
+            color = 0x13ff24
+
+            self.offline.pop(member_info.id)
+
+        #Attempt to send a message to all channels 
         for channel_id in config.channelsIds:
             channel = self.bot.get_channel(channel_id)
             if not channel:
                 raise errors.ChannelNotFound(f"Channel with id `{channel_id}` could not be fetched! Are you sure it exists and and I can see it?")
-                
-            title = f"{member_info.name} is now **DOWN**"
-            descp = f"time noticed - {datetime.datetime.utcnow()}"
-            embed = discord.Embed(title=title,description=descp , timestamp=datetime.datetime.utcnow(), color=self.embed_color or 0xff0004)
-                
-            await channel.send(content=config.alert_mes_cont if config.alert_mes_cont else None, embed=embed)
 
+            embed = discord.Embed(title=title,description=description, color=self.embed_color or color)
+            await channel.send(content=message or None, embed=embed)
 
-    async def online_alert(self, member_info):
-        """sends a embed if bot is online to all log channels"""
-        for channel_id in config.channelsIds:
-            channel = self.bot.get_channel(channel_id)
-            if not channel:
-                raise errors.ChannelNotFound(f"Channel with id `{channel_id}` could not be fetched! Are you sure it exists and and I can see it?")
-
-            title = f"{member_info.name} is currently up"
-            descp = f"time - {datetime.datetime.utcnow()}"
-            embed = discord.Embed(title=title,description=descp , timestamp=datetime.datetime.utcnow(), color=self.embed_color or 0x13ff24)
-                
-            await channel.send(content=config.up_mes_cont if config.up_mes_cont else None, embed=embed)
-
-    @tasks.loop(minutes=5)
-    async def check_status(self):
-        await self.bot.wait_until_ready()
-        print('Main checking started.')
-
-        for i in range(0, len(config.ids)):
-            ids = config.ids
-            for guild in self.bot.guilds:
-                user_list = await guild.query_members(user_ids=ids,presences=True)
-
-        for i in range(0, len(user_list)):
-            user_info = user_list[i]
-            if str(user_info.status) == "offline":
-                await self.alert(user_info)
-            elif config.online_alert:
-                await self.online_alert(user_info)
-    
-
+    @commands.Cog.listener()
+    async def on_presence_update(self, before, after):
+        if before.id in config.ids:
+            if after.status is discord.Status.offline and after.id not in self.offline:
+                await self.alert(after, True)
+            elif before.status is discord.Status.offline and after.id in self.offline:
+                await self.alert(after, False)
 
 def setup(bot):
-    bot.add_cog(StatusChecker(bot))
-    print("Extension StatusChecker is loaded")
+    cog = Statuschecker(bot)
+    bot.add_cog(cog)
+    
+    print(f"Extension {cog.qualified_name} is loaded")
